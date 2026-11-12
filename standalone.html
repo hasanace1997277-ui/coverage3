@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>AeroTimer - Flight Operations Timing Log</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      background-color: #070b14;
+      color: #f1f5f9;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Touch optimization */
+    input, button, select {
+      touch-action: manipulation;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-sky-500/30 selection:text-white">
+
+  <!-- ROOT CONTAINER -->
+  <div id="app" class="flex-1 flex flex-col"></div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 hidden transition-all duration-200">
+    <div class="flex items-center gap-2 rounded-xl border border-sky-500/40 bg-slate-900 px-4 py-2.5 text-xs text-white shadow-2xl backdrop-blur-md">
+      <svg class="h-4 w-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+      </svg>
+      <span id="toast-message" class="font-medium"></span>
+    </div>
+  </div>
+
+  <script>
+    // --- STORAGE & DATA DEFAULTS ---
+    const STORAGE_KEY_FLIGHTS = 'aerotimer_server_flights';
+    const STORAGE_KEY_ADMIN_PWD = 'aerotimer_admin_password';
+    const STORAGE_KEY_COV_NAME = 'aerotimer_coverage_name';
+    const STORAGE_KEY_COV_ID = 'aerotimer_coverage_id';
+    const DEFAULT_PASSWORD = 'cgppfaapt';
+
+    const INITIAL_FLIGHTS = [
+      {
+        id: 'flt_1',
+        date: '01-NOV-26-SUN',
+        flight: 'BG615/BG616',
+        sta: '08:15',
+        std: '09:30',
+        ata: '08:10',
+        atd: '09:35',
+        coverageMan: 'Hasan',
+        coverageId: 'CGP-01'
+      },
+      {
+        id: 'flt_2',
+        date: '01-NOV-26-SUN',
+        flight: 'BG135/BG135',
+        sta: '10:45',
+        std: '12:00',
+        ata: '10:55',
+        atd: '12:05',
+        coverageMan: 'Hasan',
+        coverageId: 'CGP-01'
+      },
+      {
+        id: 'flt_3',
+        date: '01-NOV-26-SUN',
+        flight: 'BG127/BG127',
+        sta: '13:20',
+        std: '14:35',
+        ata: '13:20',
+        atd: '14:30',
+        coverageMan: 'Rafiq',
+        coverageId: 'CGP-04'
+      },
+      {
+        id: 'flt_4',
+        date: '01-NOV-26-SUN',
+        flight: 'BG617/BG618',
+        sta: '16:00',
+        std: '17:15',
+        ata: '16:25',
+        atd: '17:50',
+        coverageMan: 'Tareq',
+        coverageId: 'CGP-08'
+      }
+    ];
+
+    // State management
+    const state = {
+      appState: 'PORTAL', // 'PORTAL' | 'COVERAGE' | 'SERVER'
+      coverageName: localStorage.getItem(STORAGE_KEY_COV_NAME) || '',
+      coverageId: localStorage.getItem(STORAGE_KEY_COV_ID) || '',
+      flights: loadFlights(),
+      editingFlightId: null,
+      isPasswordModalOpen: false,
+      searchQuery: ''
+    };
+
+    function loadFlights() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_FLIGHTS);
+        if (!raw) {
+          localStorage.setItem(STORAGE_KEY_FLIGHTS, JSON.stringify(INITIAL_FLIGHTS));
+          return INITIAL_FLIGHTS;
+        }
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : INITIAL_FLIGHTS;
+      } catch (e) {
+        return INITIAL_FLIGHTS;
+      }
+    }
+
+    function saveFlights(newFlights) {
+      state.flights = newFlights;
+      localStorage.setItem(STORAGE_KEY_FLIGHTS, JSON.stringify(newFlights));
+    }
+
+    function getAdminPassword() {
+      return localStorage.getItem(STORAGE_KEY_ADMIN_PWD) || DEFAULT_PASSWORD;
+    }
+
+    function setAdminPassword(newPwd) {
+      localStorage.setItem(STORAGE_KEY_ADMIN_PWD, newPwd.trim());
+    }
+
+    function getCurrentTimeHHMM() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      return `${hh}:${mm}`;
+    }
+
+    function getDefaultDateString() {
+      const now = new Date();
+      const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+      const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const dd = String(now.getDate()).padStart(2, '0');
+      const mmm = months[now.getMonth()];
+      const yy = String(now.getFullYear()).slice(-2);
+      const day = days[now.getDay()];
+      return `${dd}-${mmm}-${yy}-${day}`;
+    }
+
+    function normalizeTime(input) {
+      if (!input) return '';
+      const t = input.trim();
+      if (!t) return '';
+      if (/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(t)) {
+        const p = t.split(':');
+        return `${p[0].padStart(2, '0')}:${p[1]}`;
+      }
+      if (/^\d{3,4}$/.test(t)) {
+        const padded = t.padStart(4, '0');
+        const hh = parseInt(padded.slice(0, 2), 10);
+        const mm = parseInt(padded.slice(2, 4), 10);
+        if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+          return `${padded.slice(0, 2)}:${padded.slice(2, 4)}`;
+        }
+      }
+      return t;
+    }
+
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      const textEl = document.getElementById('toast-message');
+      textEl.textContent = msg;
+      el.classList.remove('hidden');
+      clearTimeout(window._toastTimeout);
+      window._toastTimeout = setTimeout(() => {
+        el.classList.add('hidden');
+      }, 3000);
+    }
+
+    // --- RENDER APP ---
+    function render() {
+      const app = document.getElementById('app');
+
+      if (state.appState === 'PORTAL') {
+        app.innerHTML = renderPortalGate();
+      } else if (state.appState === 'COVERAGE') {
+        app.innerHTML = renderCoverageView();
+      } else if (state.appState === 'SERVER') {
+        app.innerHTML = renderServerView();
+      }
+
+      attachEventListeners();
+    }
+
+    // --- PORTAL GATE VIEW ---
+    function renderPortalGate() {
+      return `
+        <div class="min-h-screen flex flex-col justify-center items-center px-4 py-8">
+          <div class="w-full max-w-md text-center mb-6">
+            <div class="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-400 ring-1 ring-sky-500/20 mb-3 shadow-lg shadow-sky-500/5">
+              <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+            </div>
+            <h1 class="text-2xl font-bold text-white tracking-tight">AeroTimer</h1>
+            <p class="text-xs text-slate-400 mt-1 font-mono">Flight Ground Operations Log</p>
+          </div>
+
+          <div id="portal-step-choice" class="w-full max-w-md space-y-4">
+            <div class="text-center text-xs text-slate-400 uppercase tracking-widest font-semibold mb-2">
+              Select Access Mode
+            </div>
+
+            <!-- Enter Coverage Button -->
+            <button id="btn-portal-coverage" class="w-full text-left p-5 rounded-2xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800/90 hover:border-sky-500/50 active:scale-[0.99] transition-all shadow-xl group">
+              <div class="flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3.5">
+                  <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-400 ring-1 ring-sky-500/20">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 class="text-base font-bold text-white tracking-tight">Enter Coverage</h2>
+                    <p class="text-xs text-slate-400 mt-0.5">For coverage men to record flight timings on phone</p>
+                  </div>
+                </div>
+                <svg class="h-5 w-5 text-slate-500 group-hover:text-sky-400 group-hover:translate-x-0.5 transition-all" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+              </div>
+            </button>
+
+            <!-- Enter Server Button -->
+            <button id="btn-portal-server" class="w-full text-left p-5 rounded-2xl border border-slate-800 bg-slate-900/90 hover:bg-slate-800/90 hover:border-emerald-500/50 active:scale-[0.99] transition-all shadow-xl group">
+              <div class="flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3.5">
+                  <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 class="text-base font-bold text-white tracking-tight">Enter Server</h2>
+                    <p class="text-xs text-slate-400 mt-0.5">For administrator to view & export master table</p>
+                  </div>
+                </div>
+                <svg class="h-5 w-5 text-slate-500 group-hover:text-emerald-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+            </button>
+          </div>
+
+          <!-- Coverage Man Input Form Modal/Step -->
+          <div id="portal-step-coverage" class="hidden w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/95 p-6 shadow-2xl">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-5">
+              <h2 class="text-sm font-bold text-white">Enter Coverage Details</h2>
+              <button id="btn-back-from-coverage" class="text-xs text-slate-400 hover:text-white">Back</button>
+            </div>
+            <form id="form-coverage-login" class="space-y-4">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1 uppercase tracking-wider">Coverage Man's Name</label>
+                <input id="input-cov-name" type="text" required value="${state.coverageName}" placeholder="e.g. Md. Hasan" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-3 text-sm text-white focus:border-sky-500 focus:outline-none" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1 uppercase tracking-wider">Coverage Man's ID</label>
+                <input id="input-cov-id" type="text" required value="${state.coverageId}" placeholder="e.g. CGP-01" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-3 text-sm font-mono text-white uppercase focus:border-sky-500 focus:outline-none" />
+              </div>
+              <button type="submit" class="w-full h-12 rounded-xl bg-sky-600 hover:bg-sky-500 active:scale-[0.99] text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-sky-600/20 cursor-pointer">
+                <span>Continue to Recording</span>
+              </button>
+            </form>
+          </div>
+
+          <!-- Server Password Input Form Modal/Step -->
+          <div id="portal-step-server" class="hidden w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/95 p-6 shadow-2xl">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-5">
+              <h2 class="text-sm font-bold text-white">Enter Administrator Password</h2>
+              <button id="btn-back-from-server" class="text-xs text-slate-400 hover:text-white">Back</button>
+            </div>
+            <form id="form-server-login" class="space-y-4">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1 uppercase tracking-wider">Administrator Password</label>
+                <input id="input-admin-pwd" type="password" required placeholder="Enter password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-3 text-sm text-white focus:border-emerald-500 focus:outline-none" />
+                <div id="pwd-error" class="hidden text-xs text-rose-400 mt-1 font-medium">Incorrect password. Default is cgppfaapt</div>
+              </div>
+              <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-400">
+                Default password is <code class="text-emerald-400 font-mono font-bold">cgppfaapt</code>. You can change this anytime after logging into the server.
+              </div>
+              <button type="submit" class="w-full h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer">
+                <span>Login to Server</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    // --- COVERAGE VIEW (ZERO HORIZONTAL SCROLL) ---
+    function renderCoverageView() {
+      const defaultDate = getDefaultDateString();
+
+      const flightCards = state.flights.map(f => {
+        return `
+          <div class="rounded-xl border border-slate-800 bg-slate-900/90 p-4 shadow-sm space-y-3">
+            <div class="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-2.5">
+              <div>
+                <div class="text-base font-extrabold text-white font-mono tracking-tight flex items-center gap-2">
+                  <svg class="h-4 w-4 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                  ${f.flight}
+                </div>
+                <div class="text-xs text-slate-400 font-mono mt-0.5">${f.date}</div>
+              </div>
+              <div class="text-right">
+                <div class="text-xs font-semibold text-slate-200">${f.coverageMan || 'Coverage Officer'}</div>
+                <div class="text-[10px] text-sky-400 font-mono">${f.coverageId ? 'ID: ' + f.coverageId : 'Coverage Man'}</div>
+              </div>
+            </div>
+
+            <!-- Timings 4-Box Mobile Layout (Zero Horizontal Scroll!) -->
+            <div class="grid grid-cols-2 gap-2.5 text-xs font-mono">
+              <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800/80">
+                <div class="text-[10px] text-slate-400 uppercase">STA (Sched Arr)</div>
+                <div class="text-sm font-bold text-white mt-0.5">${f.sta || '<span class="text-slate-600">--:--</span>'}</div>
+              </div>
+              <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800/80">
+                <div class="text-[10px] text-slate-400 uppercase">STD (Sched Dep)</div>
+                <div class="text-sm font-bold text-white mt-0.5">${f.std || '<span class="text-slate-600">--:--</span>'}</div>
+              </div>
+              <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800/80">
+                <div class="text-[10px] text-emerald-400 uppercase font-semibold">ATA (Actual Arr)</div>
+                ${f.ata ? `<div class="text-sm font-bold text-emerald-300 mt-0.5">${f.ata}</div>` : `
+                  <button onclick="stampCardTiming('${f.id}', 'ata')" class="mt-1 w-full py-1.5 px-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-bold active:scale-95">
+                    + Stamp ATA Now
+                  </button>
+                `}
+              </div>
+              <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800/80">
+                <div class="text-[10px] text-emerald-400 uppercase font-semibold">ATD (Actual Dep)</div>
+                ${f.atd ? `<div class="text-sm font-bold text-emerald-300 mt-0.5">${f.atd}</div>` : `
+                  <button onclick="stampCardTiming('${f.id}', 'atd')" class="mt-1 w-full py-1.5 px-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-bold active:scale-95">
+                    + Stamp ATD Now
+                  </button>
+                `}
+              </div>
+            </div>
+
+            <!-- Card Actions -->
+            <div class="flex items-center justify-between pt-1">
+              <span class="text-[11px] text-slate-500 font-sans">${f.atd ? 'Flight Departed' : (f.ata ? 'On Ground' : 'Scheduled')}</span>
+              <div class="flex items-center gap-2">
+                <button onclick="openEditModal('${f.id}')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1">
+                  Edit
+                </button>
+                <button onclick="deleteFlight('${f.id}')" class="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg">
+                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <!-- HEADER -->
+        <header class="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur-md">
+          <div class="max-w-xl mx-auto flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+              <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/10 text-sky-400">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              </div>
+              <div class="text-sm font-bold text-white leading-none">AeroTimer</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-xl text-xs">
+                <span class="font-bold text-white">${state.coverageName}</span>
+                <span class="text-[10px] text-sky-400 font-mono bg-sky-500/10 px-1 py-0.5 rounded">${state.coverageId}</span>
+              </div>
+              <button onclick="exitToPortal()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold">
+                Switch
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <!-- MAIN BODY -->
+        <main class="flex-1 max-w-xl w-full mx-auto px-4 py-4 space-y-5">
+          <!-- RECORD NEW FLIGHT CARD -->
+          <div class="rounded-2xl border border-slate-800 bg-slate-900 shadow-xl overflow-hidden">
+            <div class="px-4 py-3 bg-slate-950/80 border-b border-slate-800/80 font-bold text-sm text-white">
+              Record New Flight Timings
+            </div>
+            <form id="form-new-flight" class="p-4 space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-300 mb-1">DATE</label>
+                  <input id="new-date" type="text" required value="${defaultDate}" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-white uppercase focus:border-sky-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-300 mb-1">FLIGHT NUMBER</label>
+                  <input id="new-flight" type="text" required placeholder="e.g. BG615/BG616" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white uppercase focus:border-sky-500 focus:outline-none" />
+                </div>
+              </div>
+
+              <!-- Quick chips -->
+              <div>
+                <div class="text-[11px] text-slate-400 mb-1">Quick Select Flight:</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <button type="button" onclick="setFlightInput('BG615/BG616')" class="px-2 py-0.5 text-xs rounded border border-slate-800 bg-slate-950 hover:border-slate-700 text-slate-300 font-mono">BG615/BG616</button>
+                  <button type="button" onclick="setFlightInput('BG135/BG135')" class="px-2 py-0.5 text-xs rounded border border-slate-800 bg-slate-950 hover:border-slate-700 text-slate-300 font-mono">BG135/BG135</button>
+                  <button type="button" onclick="setFlightInput('BG127/BG127')" class="px-2 py-0.5 text-xs rounded border border-slate-800 bg-slate-950 hover:border-slate-700 text-slate-300 font-mono">BG127/BG127</button>
+                  <button type="button" onclick="setFlightInput('BG617/BG618')" class="px-2 py-0.5 text-xs rounded border border-slate-800 bg-slate-950 hover:border-slate-700 text-slate-300 font-mono">BG617/BG618</button>
+                </div>
+              </div>
+
+              <!-- Scheduled (STA / STD) -->
+              <div class="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+                <div class="text-xs font-semibold text-slate-300">Scheduled Timings (STA / STD)</div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-[10px] text-slate-400 mb-1">STA (Arrival)</label>
+                    <input id="new-sta" type="text" maxlength="5" placeholder="HH:mm" class="w-full bg-slate-900 border border-slate-800 rounded-lg py-2 px-2 text-center text-xs font-mono font-bold text-white focus:border-sky-500 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label class="block text-[10px] text-slate-400 mb-1">STD (Departure)</label>
+                    <input id="new-std" type="text" maxlength="5" placeholder="HH:mm" class="w-full bg-slate-900 border border-slate-800 rounded-lg py-2 px-2 text-center text-xs font-mono font-bold text-white focus:border-sky-500 focus:outline-none" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Actual (ATA / ATD) with 1-Tap NOW -->
+              <div class="rounded-xl border border-slate-800 bg-slate-900/60 p-3 space-y-2">
+                <div class="text-xs font-semibold text-emerald-400">Actual Timings (ATA / ATD)</div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-[10px] text-slate-400 mb-1">ATA (Actual Arr)</label>
+                    <div class="flex gap-1.5">
+                      <input id="new-ata" type="text" maxlength="5" placeholder="HH:mm" class="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-2 text-center text-xs font-mono font-bold text-emerald-300 focus:border-emerald-500 focus:outline-none" />
+                      <button type="button" onclick="stampInput('new-ata')" class="px-2 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-bold active:scale-95 shrink-0">NOW</button>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="block text-[10px] text-slate-400 mb-1">ATD (Actual Dep)</label>
+                    <div class="flex gap-1.5">
+                      <input id="new-atd" type="text" maxlength="5" placeholder="HH:mm" class="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-2 text-center text-xs font-mono font-bold text-emerald-300 focus:border-emerald-500 focus:outline-none" />
+                      <button type="button" onclick="stampInput('new-atd')" class="px-2 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-bold active:scale-95 shrink-0">NOW</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button type="submit" class="w-full h-12 rounded-xl bg-sky-600 hover:bg-sky-500 active:scale-[0.99] text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-sky-600/20 cursor-pointer">
+                Save Flight to Server
+              </button>
+            </form>
+          </div>
+
+          <!-- LIST OF FLIGHTS -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between px-1">
+              <h3 class="text-sm font-bold text-white">Recorded Flights on Server (${state.flights.length})</h3>
+            </div>
+            ${flightCards || '<div class="p-6 text-center text-xs text-slate-500">No flights recorded yet.</div>'}
+          </div>
+        </main>
+
+        <!-- EDIT MODAL (IF ACTIVE) -->
+        ${renderEditModal()}
+      `;
+    }
+
+    // --- SERVER VIEW (MASTER TABLE & PASSWORD CHANGE) ---
+    function renderServerView() {
+      const filtered = state.flights.filter(f => {
+        const q = state.searchQuery.toLowerCase();
+        return f.flight.toLowerCase().includes(q) ||
+               f.date.toLowerCase().includes(q) ||
+               (f.coverageMan && f.coverageMan.toLowerCase().includes(q)) ||
+               (f.coverageId && f.coverageId.toLowerCase().includes(q));
+      });
+
+      const tableRows = filtered.map(f => {
+        return `
+          <tr class="hover:bg-slate-900/50">
+            <td class="px-4 py-3 text-slate-200 font-semibold">${f.date}</td>
+            <td class="px-4 py-3 font-bold text-white">${f.flight}</td>
+            <td class="px-3 py-3 text-center text-slate-300">${f.sta || '--:--'}</td>
+            <td class="px-3 py-3 text-center text-slate-300">${f.std || '--:--'}</td>
+            <td class="px-3 py-3 text-center font-bold text-emerald-400">${f.ata || '--:--'}</td>
+            <td class="px-3 py-3 text-center font-bold text-emerald-400">${f.atd || '--:--'}</td>
+            <td class="px-4 py-3 text-slate-200 font-sans">${f.coverageMan || 'Unassigned'}</td>
+            <td class="px-3 py-3 text-center text-sky-400 font-bold">${f.coverageId || '--'}</td>
+            <td class="px-3 py-3 text-right">
+              <button onclick="openEditModal('${f.id}')" class="text-xs text-sky-400 hover:underline mr-2">Edit</button>
+              <button onclick="deleteFlight('${f.id}')" class="text-xs text-rose-400 hover:underline">Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      return `
+        <header class="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur-md">
+          <div class="max-w-4xl mx-auto flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+              <div class="text-sm font-bold text-white">AeroTimer Server Master Table</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="openPasswordModal()" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-200">
+                Change Password
+              </button>
+              <button onclick="exportCsv()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-bold text-white shadow-sm">
+                Export CSV
+              </button>
+              <button onclick="exitToPortal()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-300">
+                Exit
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main class="flex-1 max-w-4xl w-full mx-auto px-4 py-6 space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <input id="server-search" type="text" value="${state.searchQuery}" placeholder="Search flight, date, or staff..." class="w-full sm:w-72 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500" />
+            <button onclick="resetDefaults()" class="text-xs text-slate-400 hover:text-white">Reset Demo</button>
+          </div>
+
+          <div class="rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden shadow-xl">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs text-slate-300 font-mono">
+                <thead>
+                  <tr class="border-b border-slate-800 bg-slate-900/90 text-slate-400 font-bold uppercase text-[11px]">
+                    <th class="px-4 py-3">DATE</th>
+                    <th class="px-4 py-3">FLIGHT</th>
+                    <th class="px-3 py-3 text-center">STA</th>
+                    <th class="px-3 py-3 text-center">STD</th>
+                    <th class="px-3 py-3 text-center">ATA</th>
+                    <th class="px-3 py-3 text-center">ATD</th>
+                    <th class="px-4 py-3">COVERAGE MAN</th>
+                    <th class="px-3 py-3 text-center">ID</th>
+                    <th class="px-3 py-3 text-right">ACTION</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/80">
+                  ${tableRows || '<tr><td colspan="9" class="p-8 text-center text-slate-500 font-sans">No flight records found.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+            <div class="p-3 bg-slate-900/60 border-t border-slate-800 text-xs text-slate-400 flex items-center justify-between">
+              <span>Total Flights: ${state.flights.length}</span>
+              <span class="text-emerald-400 font-mono">● Local / Standalone Database Active</span>
+            </div>
+          </div>
+        </main>
+
+        <!-- PASSWORD MODAL -->
+        ${renderPasswordModal()}
+        <!-- EDIT MODAL (IF ACTIVE) -->
+        ${renderEditModal()}
+      `;
+    }
+
+    // --- MODALS ---
+    function renderEditModal() {
+      if (!state.editingFlightId) return '';
+      const f = state.flights.find(item => item.id === state.editingFlightId);
+      if (!f) return '';
+
+      return `
+        <div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 p-0 sm:p-4 backdrop-blur-xs">
+          <div class="w-full max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl p-5 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 class="text-sm font-bold text-white">Edit Flight ${f.flight}</h3>
+              <button onclick="closeEditModal()" class="text-xs text-slate-400 hover:text-white">Close</button>
+            </div>
+            <form id="form-edit-flight" class="space-y-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[11px] text-slate-400 uppercase">Date</label>
+                  <input id="edit-date" type="text" value="${f.date}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white" />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-400 uppercase">Flight</label>
+                  <input id="edit-flight" type="text" value="${f.flight}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white uppercase" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[11px] text-slate-400 uppercase">Coverage Man</label>
+                  <input id="edit-cov-name" type="text" value="${f.coverageMan || ''}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white" />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-400 uppercase">ID</label>
+                  <input id="edit-cov-id" type="text" value="${f.coverageId || ''}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white uppercase" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] text-slate-400">STA (Sched Arr)</label>
+                  <input id="edit-sta" type="text" value="${f.sta || ''}" placeholder="HH:mm" class="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 text-center text-xs font-mono text-white" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-slate-400">STD (Sched Dep)</label>
+                  <input id="edit-std" type="text" value="${f.std || ''}" placeholder="HH:mm" class="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 text-center text-xs font-mono text-white" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] text-emerald-400">ATA (Actual Arr)</label>
+                  <input id="edit-ata" type="text" value="${f.ata || ''}" placeholder="HH:mm" class="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 text-center text-xs font-mono text-emerald-300 font-bold" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-emerald-400">ATD (Actual Dep)</label>
+                  <input id="edit-atd" type="text" value="${f.atd || ''}" placeholder="HH:mm" class="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 text-center text-xs font-mono text-emerald-300 font-bold" />
+                </div>
+              </div>
+
+              <button type="submit" class="w-full py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-sky-600/20 cursor-pointer">
+                Save Changes
+              </button>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderPasswordModal() {
+      if (!state.isPasswordModalOpen) return '';
+
+      return `
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
+          <div class="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl p-5 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 class="text-sm font-bold text-white">Change Administrator Password</h3>
+              <button onclick="closePasswordModal()" class="text-xs text-slate-400 hover:text-white">Close</button>
+            </div>
+            <form id="form-change-pwd" class="space-y-3">
+              <div>
+                <label class="block text-[11px] text-slate-400 uppercase">Current Password</label>
+                <input id="pwd-curr" type="password" required placeholder="Default is cgppfaapt" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white" />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-400 uppercase">New Password</label>
+                <input id="pwd-new" type="password" required placeholder="Enter new password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white" />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-400 uppercase">Confirm New Password</label>
+                <input id="pwd-conf" type="password" required placeholder="Repeat new password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white" />
+              </div>
+              <div id="pwd-change-error" class="hidden text-xs text-rose-400 font-medium"></div>
+              <button type="submit" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold">
+                Update Password
+              </button>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    // --- EVENT LISTENERS & ACTIONS ---
+    function attachEventListeners() {
+      // Portal Buttons
+      const btnCov = document.getElementById('btn-portal-coverage');
+      const btnSrv = document.getElementById('btn-portal-server');
+      const stepChoice = document.getElementById('portal-step-choice');
+      const stepCov = document.getElementById('portal-step-coverage');
+      const stepSrv = document.getElementById('portal-step-server');
+
+      if (btnCov) {
+        btnCov.onclick = () => {
+          stepChoice.classList.add('hidden');
+          stepCov.classList.remove('hidden');
+        };
+      }
+      if (btnSrv) {
+        btnSrv.onclick = () => {
+          stepChoice.classList.add('hidden');
+          stepSrv.classList.remove('hidden');
+        };
+      }
+
+      const backCov = document.getElementById('btn-back-from-coverage');
+      if (backCov) {
+        backCov.onclick = () => {
+          stepCov.classList.add('hidden');
+          stepChoice.classList.remove('hidden');
+        };
+      }
+
+      const backSrv = document.getElementById('btn-back-from-server');
+      if (backSrv) {
+        backSrv.onclick = () => {
+          stepSrv.classList.add('hidden');
+          stepChoice.classList.remove('hidden');
+        };
+      }
+
+      // Coverage Login
+      const formCov = document.getElementById('form-coverage-login');
+      if (formCov) {
+        formCov.onsubmit = (e) => {
+          e.preventDefault();
+          const name = document.getElementById('input-cov-name').value.trim();
+          const id = document.getElementById('input-cov-id').value.trim();
+          if (!name || !id) return;
+          state.coverageName = name;
+          state.coverageId = id;
+          localStorage.setItem(STORAGE_KEY_COV_NAME, name);
+          localStorage.setItem(STORAGE_KEY_COV_ID, id);
+          state.appState = 'COVERAGE';
+          render();
+          showToast(`Welcome, ${name} (${id})`);
+        };
+      }
+
+      // Server Login
+      const formSrv = document.getElementById('form-server-login');
+      if (formSrv) {
+        formSrv.onsubmit = (e) => {
+          e.preventDefault();
+          const pwd = document.getElementById('input-admin-pwd').value;
+          const curr = getAdminPassword();
+          if (pwd.trim() === curr.trim()) {
+            state.appState = 'SERVER';
+            render();
+            showToast('Logged into Server Master Table');
+          } else {
+            document.getElementById('pwd-error').classList.remove('hidden');
+          }
+        };
+      }
+
+      // New Flight Form
+      const formNew = document.getElementById('form-new-flight');
+      if (formNew) {
+        formNew.onsubmit = (e) => {
+          e.preventDefault();
+          const date = document.getElementById('new-date').value.trim() || getDefaultDateString();
+          const flight = document.getElementById('new-flight').value.toUpperCase().trim();
+          const sta = normalizeTime(document.getElementById('new-sta').value);
+          const std = normalizeTime(document.getElementById('new-std').value);
+          const ata = normalizeTime(document.getElementById('new-ata').value);
+          const atd = normalizeTime(document.getElementById('new-atd').value);
+
+          if (!flight) return;
+
+          const newRecord = {
+            id: 'flt_' + Date.now(),
+            date,
+            flight,
+            sta,
+            std,
+            ata,
+            atd,
+            coverageMan: state.coverageName || 'Coverage Officer',
+            coverageId: state.coverageId || ''
+          };
+
+          saveFlights([newRecord, ...state.flights]);
+          render();
+          showToast(`Flight ${flight} saved to server table!`);
+        };
+      }
+
+      // Edit Flight Form
+      const formEdit = document.getElementById('form-edit-flight');
+      if (formEdit) {
+        formEdit.onsubmit = (e) => {
+          e.preventDefault();
+          const id = state.editingFlightId;
+          const date = document.getElementById('edit-date').value.trim();
+          const flight = document.getElementById('edit-flight').value.toUpperCase().trim();
+          const coverageMan = document.getElementById('edit-cov-name').value.trim();
+          const coverageId = document.getElementById('edit-cov-id').value.trim();
+          const sta = normalizeTime(document.getElementById('edit-sta').value);
+          const std = normalizeTime(document.getElementById('edit-std').value);
+          const ata = normalizeTime(document.getElementById('edit-ata').value);
+          const atd = normalizeTime(document.getElementById('edit-atd').value);
+
+          const updated = state.flights.map(f => {
+            if (f.id === id) {
+              return { ...f, date, flight, coverageMan, coverageId, sta, std, ata, atd };
+            }
+            return f;
+          });
+
+          saveFlights(updated);
+          state.editingFlightId = null;
+          render();
+          showToast(`Flight ${flight} updated!`);
+        };
+      }
+
+      // Password Change Form
+      const formPwd = document.getElementById('form-change-pwd');
+      if (formPwd) {
+        formPwd.onsubmit = (e) => {
+          e.preventDefault();
+          const curr = document.getElementById('pwd-curr').value;
+          const n1 = document.getElementById('pwd-new').value;
+          const n2 = document.getElementById('pwd-conf').value;
+          const errEl = document.getElementById('pwd-change-error');
+
+          errEl.classList.add('hidden');
+
+          if (curr.trim() !== getAdminPassword().trim()) {
+            errEl.textContent = 'Current password is incorrect.';
+            errEl.classList.remove('hidden');
+            return;
+          }
+          if (n1 !== n2) {
+            errEl.textContent = 'New passwords do not match.';
+            errEl.classList.remove('hidden');
+            return;
+          }
+          if (n1.length < 4) {
+            errEl.textContent = 'New password must be at least 4 characters.';
+            errEl.classList.remove('hidden');
+            return;
+          }
+
+          setAdminPassword(n1);
+          state.isPasswordModalOpen = false;
+          render();
+          showToast('Administrator password updated successfully!');
+        };
+      }
+
+      // Search
+      const searchInput = document.getElementById('server-search');
+      if (searchInput) {
+        searchInput.oninput = (e) => {
+          state.searchQuery = e.target.value;
+          render();
+          const el = document.getElementById('server-search');
+          if (el) {
+            el.focus();
+            el.setSelectionRange(el.value.length, el.value.length);
+          }
+        };
+      }
+    }
+
+    // --- GLOBAL SCOPE HELPERS (USED IN INLINE ONCLICK) ---
+    window.exitToPortal = () => {
+      state.appState = 'PORTAL';
+      render();
+    };
+
+    window.openPasswordModal = () => {
+      state.isPasswordModalOpen = true;
+      render();
+    };
+
+    window.closePasswordModal = () => {
+      state.isPasswordModalOpen = false;
+      render();
+    };
+
+    window.openEditModal = (id) => {
+      state.editingFlightId = id;
+      render();
+    };
+
+    window.closeEditModal = () => {
+      state.editingFlightId = null;
+      render();
+    };
+
+    window.deleteFlight = (id) => {
+      saveFlights(state.flights.filter(f => f.id !== id));
+      render();
+      showToast('Flight record deleted');
+    };
+
+    window.stampCardTiming = (id, field) => {
+      const now = getCurrentTimeHHMM();
+      const updated = state.flights.map(f => {
+        if (f.id === id) {
+          return { ...f, [field]: now };
+        }
+        return f;
+      });
+      saveFlights(updated);
+      render();
+      showToast(`Stamped ${field.toUpperCase()}: ${now}`);
+    };
+
+    window.stampInput = (inputId) => {
+      const el = document.getElementById(inputId);
+      if (el) el.value = getCurrentTimeHHMM();
+    };
+
+    window.setFlightInput = (val) => {
+      const el = document.getElementById('new-flight');
+      if (el) el.value = val;
+    };
+
+    window.resetDefaults = () => {
+      saveFlights(INITIAL_FLIGHTS);
+      render();
+      showToast('Reset to default sheet flights');
+    };
+
+    window.exportCsv = () => {
+      const headers = ['DATE', 'FLIGHT', 'STA', 'STD', 'ATA', 'ATD', 'COVERAGE_MAN_NAME', 'COVERAGE_MAN_ID'];
+      const rows = state.flights.map(f => [
+        `"${f.date || ''}"`,
+        `"${f.flight || ''}"`,
+        `"${f.sta || ''}"`,
+        `"${f.std || ''}"`,
+        `"${f.ata || ''}"`,
+        `"${f.atd || ''}"`,
+        `"${(f.coverageMan || '').replace(/"/g, '""')}"`,
+        `"${(f.coverageId || '').replace(/"/g, '""')}"`
+      ]);
+      const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'flight_coverage_timings.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('CSV Exported');
+    };
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>
